@@ -4,7 +4,8 @@ version = "0.1.0"
 authors = ["kilic <kiliconu@itu.edu.tr>"]
 edition = "2018"
 
-
+[dev-dependencies]
+rand_xorshift = "0.3"
 
 [dependencies]
 subtle = "2.3"

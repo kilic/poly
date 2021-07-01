@@ -1,17 +1,14 @@
-use super::{Coeff, LagrangeCoeff, Polynomial};
+use super::{LagrangeCoeff, Polynomial};
 use crate::arithmetic::{
-    best_fft, best_multiexp, eval_polynomial, kate_division, parallelize, BaseExt, CurveAffine,
-    CurveExt, Engine, Field, FieldExt, Group as _, LinearCombinationEngine, MultiMillerLoop,
+    best_multiexp, eval_polynomial, kate_division, Engine, Field, LinearCombinationEngine,
+    MultiMillerLoop,
 };
 
 use group::prime::PrimeCurveAffine;
 use group::Group;
 use pairing::arithmetic::MillerLoopResult;
 use rand::RngCore;
-use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::ops::Add;
-use std::ops::Mul;
 use subtle::Choice;
 
 pub struct PolyCommitSetup<E>
@@ -74,6 +71,7 @@ where
         for i in 1..n {
             bases.push((bases[i - 1] * s).into());
         }
+
         let prover_key = ProverKey::<E> { bases };
         let g2 = <E::G2Affine as PrimeCurveAffine>::generator();
         let verifier_key = VerifierKey::<E> {
@@ -96,10 +94,13 @@ where
         let mut scalars = Vec::with_capacity(poly.len() + 1);
         scalars.extend(poly.iter());
         let bases = &self.prover_key.bases;
-        best_multiexp(&scalars, bases).into()
+        let size = scalars.len();
+        assert!(bases.len() >= size);
+        best_multiexp(&scalars, &bases[0..size]).into()
     }
 
     pub fn witness(&self, poly: &Polynomial<E::Fr, LagrangeCoeff>, z: E::Fr) -> E::G1Affine {
+        // TODO: should return eval too?
         let eval = eval_polynomial(poly, z);
         let poly = poly - eval;
         let values = kate_division(&poly.values, z);
@@ -227,4 +228,49 @@ where
             .final_exponentiation()
             .is_identity()
     }
+}
+
+#[test]
+fn test_kzg() {
+    use pairing::bn256::Bn256;
+    use pairing::bn256::Fr;
+    use rand::SeedableRng;
+    use rand_xorshift::XorShiftRng;
+
+    let mut rng = XorShiftRng::from_seed([
+        0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
+    ]);
+
+    fn rand_poly(n: usize, mut rng: impl RngCore) -> Polynomial<Fr, LagrangeCoeff> {
+        let poly = Polynomial {
+            values: (0..n).into_iter().map(|_| Fr::random(&mut rng)).collect(),
+            _marker: PhantomData,
+        };
+        poly
+    }
+
+    let size = 8;
+    let setup = PolyCommitSetup::<Bn256>::new(size, &mut rng);
+    let prover = BaseProver {
+        prover_key: setup.prover_key,
+    };
+
+    let p_x = rand_poly(size, &mut rng);
+    let p_comm = prover.commit(&p_x);
+    let z = Fr::random(&mut rng);
+    let e = eval_polynomial(&p_x, z);
+    let witness = prover.witness(&p_x, z);
+
+    let verifier = BaseVerifier {
+        verifier_key: setup.verifier_key,
+    };
+
+    assert!(bool::from(verifier.verify(witness, p_comm, e, z)));
+    assert!(!bool::from(verifier.verify(
+        witness,
+        p_comm,
+        e,
+        z + Fr::one()
+    )));
 }
