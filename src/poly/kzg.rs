@@ -3,7 +3,6 @@ use crate::arithmetic::{
     best_multiexp, eval_polynomial, kate_division, Engine, Field, LinearCombinationEngine,
     MultiMillerLoop,
 };
-
 use group::prime::PrimeCurveAffine;
 use group::Group;
 use pairing::arithmetic::MillerLoopResult;
@@ -125,36 +124,28 @@ where
     }
 
     pub fn witness_multi(&self, inputs: Vec<MultiProverInput<E>>) -> Vec<E::G1Affine> {
-        inputs
-            .iter()
-            .map(|input| {
-                let zero = Self::empty_polynomial();
-                let mut lc = <E::Fr as Field>::one();
-                let poly: Polynomial<E::Fr, LagrangeCoeff> = input
-                    .polynomials
-                    .iter()
-                    .map(|poly| {
-                        let poly = poly - eval_polynomial(poly.as_ref(), input.z);
-                        poly
-                    })
-                    .fold(zero, |mut acc, poly| {
-                        acc = acc + &(poly * lc);
-                        lc *= input.challenge;
-                        acc
-                    });
-                let values = kate_division(&poly.values, input.z);
-                let witness_poly = Polynomial {
-                    values,
-                    _marker: PhantomData,
-                };
-                self.commit(&witness_poly)
-            })
-            .collect()
+        let mut witnesses = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            let mut u_x = Self::empty_polynomial();
+            let mut lc = <E::Fr as Field>::one();
+            for poly in input.polynomials {
+                let poly = &poly - eval_polynomial(poly.as_ref(), input.z);
+                u_x = (poly * lc) + &u_x;
+                lc *= input.challenge;
+            }
+            let values = kate_division(&u_x.values, input.z);
+            let witness_poly = Polynomial {
+                values,
+                _marker: PhantomData,
+            };
+            witnesses.push(self.commit(&witness_poly));
+        }
+        witnesses
     }
 
     fn empty_polynomial() -> Polynomial<E::Fr, LagrangeCoeff> {
         let zero = Polynomial {
-            values: vec![],
+            values: vec![E::Fr::zero()],
             _marker: PhantomData,
         };
         zero
@@ -172,7 +163,7 @@ where
         evaluation: E::Fr,
         z: E::Fr,
     ) -> Choice {
-        let e = <E::G1Affine as PrimeCurveAffine>::generator() * -evaluation;
+        let e = self.verifier_key.g1 * -evaluation;
         let wz = witness * z;
 
         let s_g2_prepared = E::G2Prepared::from(self.verifier_key.s_g2);
@@ -184,8 +175,6 @@ where
             .final_exponentiation()
             .is_identity()
     }
-
-    fn check() {}
 }
 
 impl<E> MultiVerifier<E>
@@ -215,7 +204,7 @@ where
         }
         let f = f_multi_point_combination.result();
         let g1 = self.base_verifier.verifier_key.g1;
-        let e = g1 * e_multi_eval_combination.result();
+        let e = g1 * -e_multi_eval_combination.result();
         let w = w_multi_point_combination.result();
         let wz = wz_multi_point_combination.result();
 
@@ -252,6 +241,7 @@ fn test_kzg() {
 
     let size = 8;
     let setup = PolyCommitSetup::<Bn256>::new(size, &mut rng);
+
     let prover = BaseProver {
         prover_key: setup.prover_key,
     };
@@ -273,4 +263,92 @@ fn test_kzg() {
         e,
         z + Fr::one()
     )));
+
+    let prover = MultiProver {
+        base_prover: prover,
+    };
+
+    let p00_x = rand_poly(size, &mut rng);
+    let p01_x = rand_poly(size, &mut rng);
+    let p10_x = rand_poly(size, &mut rng);
+    let p11_x = rand_poly(size, &mut rng);
+    let z0 = Fr::random(&mut rng);
+    let z1 = Fr::random(&mut rng);
+    let u0 = Fr::random(&mut rng);
+    let u1 = Fr::random(&mut rng);
+
+    let mut inputs: Vec<MultiProverInput<Bn256>> = Vec::with_capacity(2);
+
+    inputs.push(MultiProverInput {
+        challenge: u0,
+        z: z0,
+        polynomials: vec![p00_x.clone(), p01_x.clone()],
+    });
+
+    inputs.push(MultiProverInput {
+        challenge: u1,
+        z: z1,
+        polynomials: vec![p10_x.clone(), p11_x.clone()],
+    });
+
+    let p00_comm = prover.commit(&p00_x);
+    let p01_comm = prover.commit(&p01_x);
+    let p10_comm = prover.commit(&p10_x);
+    let p11_comm = prover.commit(&p11_x);
+    let e00 = eval_polynomial(&p00_x, z0);
+    let e01 = eval_polynomial(&p01_x, z0);
+    let e10 = eval_polynomial(&p10_x, z1);
+    let e11 = eval_polynomial(&p11_x, z1);
+
+    let witnesses = prover.witness_multi(inputs);
+
+    let multi_verifier = MultiVerifier {
+        base_verifier: verifier,
+    };
+
+    let mut inputs: Vec<MultiVerifierInput<Bn256>> = Vec::with_capacity(2);
+
+    inputs.push(MultiVerifierInput {
+        challenge: u0,
+        z: z0,
+        evaluations: vec![e00, e01],
+        commitments: vec![p00_comm, p01_comm],
+        witness: witnesses[0],
+    });
+
+    inputs.push(MultiVerifierInput {
+        challenge: u1,
+        z: z1,
+        evaluations: vec![e10, e11],
+        commitments: vec![p10_comm, p11_comm],
+        witness: witnesses[1],
+    });
+
+    let multi_point_eval_challenge = Fr::random(&mut rng);
+
+    assert!(bool::from(
+        multi_verifier.verify_multi(inputs, multi_point_eval_challenge)
+    ));
+
+    let mut inputs: Vec<MultiVerifierInput<Bn256>> = Vec::with_capacity(2);
+
+    inputs.push(MultiVerifierInput {
+        challenge: u1,
+        z: z0,
+        evaluations: vec![e00, e01],
+        commitments: vec![p00_comm, p01_comm],
+        witness: witnesses[0],
+    });
+
+    inputs.push(MultiVerifierInput {
+        challenge: u1,
+        z: z1,
+        evaluations: vec![e10, e11],
+        commitments: vec![p10_comm, p11_comm],
+        witness: witnesses[1],
+    });
+
+    assert!(!bool::from(
+        multi_verifier.verify_multi(inputs, multi_point_eval_challenge)
+    ));
 }
