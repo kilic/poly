@@ -1,6 +1,3 @@
-mod domain;
-mod kzg;
-
 use crate::arithmetic::parallelize;
 use crate::arithmetic::BatchInvert;
 use crate::pairing::arithmetic::FieldExt;
@@ -8,9 +5,21 @@ use crate::plonk::Assigned;
 use ff::Field;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::{
-    Add, AddAssign, Deref, DerefMut, Index, IndexMut, Mul, RangeFrom, RangeFull, Sub, SubAssign,
-};
+use std::ops::{Add, Deref, DerefMut, Index, IndexMut, Mul, RangeFrom, RangeFull, Sub};
+
+pub mod commitment;
+mod domain;
+pub mod msm;
+pub mod multiopen;
+pub use domain::*;
+
+#[derive(Debug)]
+pub enum Error {
+    /// OpeningProof is not well-formed
+    OpeningError,
+    /// Caller needs to re-sample a point
+    SamplingError,
+}
 
 /// The basis over which a polynomial is described.
 pub trait Basis: Clone + Debug + Send + Sync {}
@@ -236,6 +245,53 @@ impl<'a, F: Field> Polynomial<F, LagrangeCoeff> {
         }
     }
 }
+
+// impl<'a, F: Field> LinearCombinationEngine for &'a Polynomial<F, ExtendedLagrangeCoeff> {
+//     type Lhs = &'a Polynomial<F, ExtendedLagrangeCoeff>;
+//     type Rhs = F;
+
+//     fn new(base: Self::Rhs) -> Self;
+//     fn result(&mut self) -> Self::Lhs;
+//     fn add(&mut self, elem: Self::Lhs);
+//     fn add_with_aux(&mut self, elem: Self::Lhs, aux: Self::Rhs);
+//     fn combine(base: Self::Rhs, coeffs: Vec<Self::Lhs>) -> Self::Lhs;
+
+//     // type Lhs = Fr;
+//     // type Rhs = Fr;
+
+//     // fn new(base: Fr) -> Self {
+//     //     ScalarCombination {
+//     //         sum: Fr::zero(),
+//     //         base,
+//     //         lc: Fr::one(),
+//     //     }
+//     // }
+
+//     // fn result(&mut self) -> Self::Lhs {
+//     //     let res = self.sum;
+//     //     self.sum = Fr::zero();
+//     //     self.lc = Fr::one();
+//     //     res
+//     // }
+
+//     // fn add(&mut self, elem: Self::Lhs) {
+//     //     self.sum += elem * self.lc;
+//     //     self.lc *= self.base;
+//     // }
+
+//     // fn add_with_aux(&mut self, elem: Self::Lhs, aux: Self::Rhs) {
+//     //     self.sum += elem * self.lc * aux;
+//     //     self.lc *= self.base;
+//     // }
+
+//     // fn combine(base: Self::Rhs, elems: Vec<Self::Lhs>) -> Self::Lhs {
+//     //     let mut lc = Self::new(base);
+//     //     for elem in elems.iter() {
+//     //         lc.add(*elem);
+//     //     }
+//     //     lc.result()
+//     // }
+// }
 
 impl<'a, F: Field, B: Basis> Sub<F> for &'a Polynomial<F, B> {
     type Output = Polynomial<F, B>;

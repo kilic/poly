@@ -1,13 +1,11 @@
 //! Contains utilities for performing polynomial arithmetic over an evaluation
 //! domain that is of a suitable size for the application.
 
+use super::{Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation};
 use crate::{
     arithmetic::{best_fft, parallelize, BaseExt, BatchInvert, FieldExt, Group},
     plonk::Assigned,
 };
-
-use super::{Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation};
-
 use ff::{Field, PrimeField};
 use std::marker::PhantomData;
 
@@ -78,7 +76,8 @@ impl<G: Group> EvaluationDomain<G> {
         // The coset evaluation domain is:
         // zeta {1, extended_omega, extended_omega^2, ..., extended_omega^{(2^extended_k) - 1}}
         let g_coset = G::Scalar::ZETA;
-        let g_coset_inv = g_coset.square();
+        // let g_coset_inv = g_coset.square();
+        let g_coset_inv = g_coset.invert().unwrap();
 
         let mut t_evaluations = Vec::with_capacity(1 << (extended_k - k));
         {
@@ -325,7 +324,7 @@ impl<G: Group> EvaluationDomain<G> {
     // `[a_0, [zeta]a_1, [zeta^2]a_2, a_3, [zeta]a_4, [zeta^2]a_5, a_6, ...]`,
     // where zeta is a cube root of unity in the multiplicative subgroup with
     // order (p - 1), i.e. zeta^3 = 1.
-    fn distribute_powers_zeta(mut a: &mut [G]) {
+    pub fn distribute_powers_zeta(mut a: &mut [G]) {
         let coset_powers = [G::Scalar::ZETA, G::Scalar::ZETA.square()];
         parallelize(&mut a, |a, mut index| {
             for a in a {
@@ -341,7 +340,7 @@ impl<G: Group> EvaluationDomain<G> {
 
     // Given a length-`n` slice of group elements `a` and a scalar `g`, this
     // returns `[a_0, [g]a_1, [g^2]a_2, [g^3]a_3, ..., [g^n-1] a_{n-1}]`.
-    fn distribute_powers(mut a: &mut [G], g: G::Scalar) {
+    pub fn distribute_powers(mut a: &mut [G], g: G::Scalar) {
         parallelize(&mut a, |a, index| {
             let mut cur = g.pow_vartime(&[index as u64, 0, 0, 0]);
             for a in a {
