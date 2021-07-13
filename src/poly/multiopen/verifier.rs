@@ -1,3 +1,5 @@
+use std::ops::Add;
+
 use super::super::{commitment::Params, Error};
 use super::{construct_intermediate_sets, ChallengeU, ChallengeV, Query, VerifierQuery};
 use crate::arithmetic::CurveAffine;
@@ -28,10 +30,11 @@ where
 
     let commitment_data = construct_intermediate_sets(queries);
 
-    let mut combination_commitment = params.empty_msm();
-    let mut combination_eval = C::Fr::zero();
-    let mut combination_witness = params.empty_msm();
-    let mut combination_witness_with_aux = params.empty_msm();
+    let mut commitment_multi = params.empty_msm();
+    let mut eval_multi = C::Fr::zero();
+
+    let mut witness = params.empty_msm();
+    let mut witness_with_aux = params.empty_msm();
 
     for commitment_at_a_point in commitment_data.iter() {
         assert!(commitment_at_a_point.queries.len() > 0);
@@ -39,28 +42,35 @@ where
 
         let wi = transcript.read_point().map_err(|_| Error::SamplingError)?;
 
-        combination_witness_with_aux.scale(*u);
-        combination_witness_with_aux.append_term(z, wi);
-        combination_witness.scale(*u);
-        combination_witness.append_term(C::Fr::one(), wi);
+        witness_with_aux.scale(*u);
+        witness_with_aux.append_term(z, wi);
+        witness.scale(*u);
+        witness.append_term(C::Fr::one(), wi);
+        commitment_multi.scale(*u);
+        eval_multi = eval_multi * *u;
 
-        combination_commitment.scale(*u);
+        let mut commitment_batch = params.empty_msm();
+        let mut eval_batch = C::Fr::zero();
+
         for query in commitment_at_a_point.queries.iter() {
             assert_eq!(query.get_point(), z);
 
             let commitment = query.get_commitment();
             let eval = query.get_eval();
 
-            combination_commitment.scale(*v);
-            combination_commitment.append_term(C::Fr::one(), *commitment.0);
-            combination_eval = combination_eval * *v + eval;
+            commitment_batch.scale(*v);
+            commitment_batch.append_term(C::Fr::one(), *commitment.0);
+            eval_batch = eval_batch * *v + eval;
         }
+
+        commitment_multi.add_msm(&commitment_batch);
+        eval_multi += eval_batch;
     }
 
-    let e = -params.g1 * combination_eval;
-    let f = combination_commitment.eval();
-    let w = combination_witness.eval();
-    let zw = combination_witness_with_aux.eval();
+    let e = -params.g1 * eval_multi;
+    let f = commitment_multi.eval();
+    let w = witness.eval();
+    let zw = witness_with_aux.eval();
 
     let s_g2_prepared = C::G2Prepared::from(params.s_g2);
     let n_g2_prepared = C::G2Prepared::from(-params.g2);

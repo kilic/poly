@@ -35,8 +35,8 @@ where
     };
 
     for commitment_at_a_point in commitment_data.iter() {
-        let mut combination_poly = zero();
-        let mut combination_eval = C::Fr::zero();
+        let mut poly_batch = zero();
+        let mut eval_batch = C::Fr::zero();
         let z = commitment_at_a_point.point;
         for query in commitment_at_a_point.queries.iter() {
             assert_eq!(query.get_point(), z);
@@ -44,13 +44,13 @@ where
             let poly = query.get_commitment().poly;
             let eval = query.get_eval();
 
-            combination_poly = combination_poly * *v + poly;
-            combination_eval = combination_eval * *v + eval;
+            poly_batch = poly_batch * *v + poly;
+            eval_batch = eval_batch * *v + eval;
         }
 
-        let combination_poly = &combination_poly - combination_eval;
+        let poly_batch = &poly_batch - eval_batch;
         let witness_poly = Polynomial {
-            values: kate_division(&combination_poly.values, z),
+            values: kate_division(&poly_batch.values, z),
             _marker: PhantomData,
         };
         // TODO: assert degree

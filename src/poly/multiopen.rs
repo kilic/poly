@@ -3,11 +3,11 @@
 //!
 //! [halo]: https://eprint.iacr.org/2019/1021
 
+
 use super::*;
 use crate::{
     arithmetic::{eval_polynomial, CurveAffine, FieldExt},
-    poly::commitment::Params,
-    transcript::{ChallengeScalar, Transcript, TranscriptWrite},
+    transcript::{ChallengeScalar},
 };
 use std::collections::BTreeMap;
 
@@ -128,41 +128,125 @@ fn test_multiopen() {
 
     // prover
 
-    let p00_x = rand_poly(params.n as usize, &mut rng);
-    let p01_x = rand_poly(params.n as usize, &mut rng);
-    let p10_x = rand_poly(params.n as usize, &mut rng);
-    let p11_x = rand_poly(params.n as usize, &mut rng);
+    let p1_x = rand_poly(params.n as usize, &mut rng);
+    let p2_x = rand_poly(params.n as usize, &mut rng);
+    let p3_x = rand_poly(params.n as usize, &mut rng);
+    let p4_x = rand_poly(params.n as usize, &mut rng);
 
     let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
-    let commitment = params.commit(&p00_x);
-    transcript.write_point(commitment).unwrap();
+    let p1 = params.commit(&p1_x);
+    transcript.write_point(p1).unwrap();
+    let p2 = params.commit(&p2_x);
+    transcript.write_point(p2).unwrap();
+    let p3 = params.commit(&p3_x);
+    transcript.write_point(p3).unwrap();
+    let p4 = params.commit(&p4_x);
+    transcript.write_point(p4).unwrap();
 
     let z0: ChallengeZ<_> = transcript.squeeze_challenge_scalar();
+    let z1: ChallengeZ<_> = transcript.squeeze_challenge_scalar();
+    println!("z0  {:?}", z0);
 
-    let eval = eval_polynomial(&p00_x, *z0);
-    transcript.write_scalar(eval).unwrap();
+    let e01 = eval_polynomial(&p1_x, *z0);
+    transcript.write_scalar(e01).unwrap();
+    let e02 = eval_polynomial(&p2_x, *z0);
+    transcript.write_scalar(e02).unwrap();
+    let e03 = eval_polynomial(&p3_x, *z0);
+    transcript.write_scalar(e03).unwrap();
+    let e04 = eval_polynomial(&p4_x, *z0);
+    transcript.write_scalar(e04).unwrap();
+
+    let e13 = eval_polynomial(&p3_x, *z1);
+    transcript.write_scalar(e13).unwrap();
+    let e14 = eval_polynomial(&p4_x, *z1);
+    transcript.write_scalar(e14).unwrap();
 
     let q0 = ProverQuery {
-        poly: &p00_x,
+        poly: &p1_x,
         point: *z0,
-        eval,
+        eval: e01,
     };
-    let queries: Vec<ProverQuery<G1Affine>> = vec![q0];
+    let q1 = ProverQuery {
+        poly: &p2_x,
+        point: *z0,
+        eval: e02,
+    };
+    let q2 = ProverQuery {
+        poly: &p3_x,
+        point: *z0,
+        eval: e03,
+    };
+    let q3 = ProverQuery {
+        poly: &p4_x,
+        point: *z0,
+        eval: e04,
+    };
+    let q4 = ProverQuery {
+        poly: &p3_x,
+        point: *z1,
+        eval: e13,
+    };
+    let q5 = ProverQuery {
+        poly: &p4_x,
+        point: *z1,
+        eval: e14,
+    };
+
+    let queries: Vec<ProverQuery<G1Affine>> = vec![q0, q1, q2, q3, q4, q5];
     create_proof(&params, &mut transcript, queries).unwrap();
     let proof = transcript.finalize();
 
     // verifier
 
     let mut transcript = Blake2bRead::<_, G1Affine, Challenge255<_>>::init(&proof[..]);
-    let commitment = &transcript.read_point().unwrap();
+    let p1 = &transcript.read_point().unwrap();
+    let p2 = &transcript.read_point().unwrap();
+    let p3 = &transcript.read_point().unwrap();
+    let p4 = &transcript.read_point().unwrap();
+
     let z0: ChallengeZ<_> = transcript.squeeze_challenge_scalar();
-    let eval = transcript.read_scalar().unwrap();
+    let z1: ChallengeZ<_> = transcript.squeeze_challenge_scalar();
+
+    let e01 = transcript.read_scalar().unwrap();
+    let e02 = transcript.read_scalar().unwrap();
+    let e03 = transcript.read_scalar().unwrap();
+    let e04 = transcript.read_scalar().unwrap();
+    let e13 = transcript.read_scalar().unwrap();
+    let e14 = transcript.read_scalar().unwrap();
 
     let q0 = VerifierQuery {
-        commitment,
+        commitment: p1,
         point: *z0,
-        eval,
+        eval: e01,
     };
-    let queries: Vec<VerifierQuery<G1Affine>> = vec![q0];
-    let ret = verify_proof(&params, &mut transcript, queries).unwrap();
+    let q1 = VerifierQuery {
+        commitment: p2,
+        point: *z0,
+        eval: e02,
+    };
+    let q2 = VerifierQuery {
+        commitment: p3,
+        point: *z0,
+        eval: e03,
+    };
+    let q3 = VerifierQuery {
+        commitment: p4,
+        point: *z0,
+        eval: e04,
+    };
+    let q4 = VerifierQuery {
+        commitment: p3,
+        point: *z1,
+        eval: e13,
+    };
+    let q5 = VerifierQuery {
+        commitment: p4,
+        point: *z1,
+        eval: e14,
+    };
+
+    let queries: Vec<VerifierQuery<G1Affine>> = vec![q0, q1, q2, q3, q4, q5];
+    assert!(bool::from(
+        verify_proof(&params, &mut transcript, queries).unwrap()
+    ));
 }
